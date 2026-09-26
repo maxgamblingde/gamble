@@ -656,6 +656,7 @@ const IS_REPLIT_HOST = location.hostname === 'localhost' || location.hostname ==
 const LOCAL_MODE = URL_MODE === 'local' || (!IS_REPLIT_HOST && URL_MODE !== 'api');
 const LOCAL_DB_KEY = 'lucky-strike-casino-local-v2';
 const LOCAL_ADMIN_PASSWORD = 'admin:root';
+const MIN_REMAINING_CREDITS = 2;
 
 // =================== STATE ===================
 let player = null;
@@ -819,20 +820,20 @@ async function localReq(path, method = 'GET', body = null, headers = {}) {
   if (path === '/gambling/horses' && method === 'GET') return localHorses();
   if (path === '/gambling/coin-flip' && method === 'POST') {
     const bet = Number(body?.bet);
-    if (!Number.isInteger(bet) || bet <= 0 || bet >= player.credits) localError('Ungültiger Einsatz. Mindestens 1 Credit muss übrig bleiben.');
+    if (!Number.isInteger(bet) || bet <= 0 || bet > player.credits - MIN_REMAINING_CREDITS) localError('Ungültiger Einsatz. Mindestens 2 Credits müssen übrig bleiben.');
     const choice = body.choice, outcome = Math.random() < 0.55 ? choice : choice === 'heads' ? 'tails' : 'heads';
     const won = outcome === choice;
     return localApplyGame(db, player, { bet, won, payout: won ? bet * 2 : 0, outcome, message: won ? `Es ist ${outcome === 'heads' ? 'Kopf' : 'Zahl'}! Du gewinnst ${bet} Credits!` : `Es ist ${outcome === 'heads' ? 'Kopf' : 'Zahl'}! Du verlierst ${bet} Credits.` });
   }
   if (path === '/gambling/dice' && method === 'POST') {
     const bet = Number(body?.bet), prediction = Number(body?.prediction);
-    if (!Number.isInteger(bet) || bet <= 0 || bet >= player.credits || prediction < 1 || prediction > 6) localError('Ungültiger Einsatz. Mindestens 1 Credit muss übrig bleiben.');
+    if (!Number.isInteger(bet) || bet <= 0 || bet > player.credits - MIN_REMAINING_CREDITS || prediction < 1 || prediction > 6) localError('Ungültiger Einsatz. Mindestens 2 Credits müssen übrig bleiben.');
     const outcome = Math.floor(Math.random() * 6) + 1, won = outcome === prediction;
     return localApplyGame(db, player, { bet, won, payout: won ? bet * 5 : 0, pointsEarned: won ? 25 : 0, outcome: String(outcome), message: won ? `Gewürfelt: ${outcome}! Du gewinnst ${bet * 4} Credits!` : `Gewürfelt: ${outcome}. Du verlierst ${bet} Credits.` });
   }
   if (path === '/gambling/slots' && method === 'POST') {
     const bet = Number(body?.bet), symbols = ['Kirsche', 'Zitrone', 'Orange', 'Traube', 'Sieben', 'Diamant'];
-    if (!Number.isInteger(bet) || bet <= 0 || bet >= player.credits) localError('Ungültiger Einsatz. Mindestens 1 Credit muss übrig bleiben.');
+    if (!Number.isInteger(bet) || bet <= 0 || bet > player.credits - MIN_REMAINING_CREDITS) localError('Ungültiger Einsatz. Mindestens 2 Credits müssen übrig bleiben.');
     const reels = [0, 1, 2].map(() => symbols[Math.floor(Math.random() * symbols.length)]);
     const allSame = reels.every(x => x === reels[0]), twoSame = new Set(reels).size < 3;
     const multipliers = { Kirsche: 2, Zitrone: 2, Orange: 3, Traube: 4, Sieben: 10, Diamant: 20 };
@@ -841,7 +842,7 @@ async function localReq(path, method = 'GET', body = null, headers = {}) {
   }
   if (path === '/gambling/roulette' && method === 'POST') {
     const bet = Number(body?.bet), spin = Math.floor(Math.random() * 37);
-    if (!Number.isInteger(bet) || bet <= 0 || bet >= player.credits) localError('Ungültiger Einsatz. Mindestens 1 Credit muss übrig bleiben.');
+    if (!Number.isInteger(bet) || bet <= 0 || bet > player.credits - MIN_REMAINING_CREDITS) localError('Ungültiger Einsatz. Mindestens 2 Credits müssen übrig bleiben.');
     const red = [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36].includes(spin);
     const type = body.betType, won = (type === 'red' && red) || (type === 'black' && !red && spin !== 0) || (type === 'even' && spin !== 0 && spin % 2 === 0) || (type === 'odd' && spin % 2 === 1) || (type === 'number' && spin === Number(body.number));
     const multiplier = type === 'number' ? 36 : 2, payout = won ? bet * multiplier : 0;
@@ -849,7 +850,7 @@ async function localReq(path, method = 'GET', body = null, headers = {}) {
   }
   if (path === '/gambling/horse-race' && method === 'POST') {
     const bet = Number(body?.bet), horses = localHorses(), selected = horses.find(h => h.id === Number(body?.horseId));
-    if (!Number.isInteger(bet) || bet <= 0 || bet >= player.credits || !selected) localError('Ungültiger Einsatz. Mindestens 1 Credit muss übrig bleiben.');
+    if (!Number.isInteger(bet) || bet <= 0 || bet > player.credits - MIN_REMAINING_CREDITS || !selected) localError('Ungültiger Einsatz. Mindestens 2 Credits müssen übrig bleiben.');
     let random = Math.random(), winner = horses[0];
     for (const horse of horses) { random -= horse.winChance; if (random < 0) { winner = horse; break; } }
     const won = winner.id === selected.id, payout = won ? bet * selected.multiplier : 0;
@@ -1373,12 +1374,12 @@ document.querySelectorAll('.overlay').forEach(o => o.addEventListener('click', e
 // =================== BET HELPERS ===================
 function setBet(id, v) { document.getElementById(id).value = v; }
 function setHalf(id) { document.getElementById(id).value = Math.max(1, Math.floor((player?.credits || 500) / 2)); }
-function setMax(id) { document.getElementById(id).value = Math.max(1, (player?.credits || 500) - 1); }
+function setMax(id) { document.getElementById(id).value = Math.max(1, (player?.credits || 500) - MIN_REMAINING_CREDITS); }
 function getBet(id) {
   const v = parseInt(document.getElementById(id).value);
   if (isNaN(v) || v <= 0) { toast('Bitte einen gültigen Einsatz eingeben.', 'error'); return null; }
-  const maxBet = Math.max(0, (player?.credits || 0) - 1);
-  if (v > maxBet) { toast('Mindestens 1 Credit muss übrig bleiben.', 'error'); return null; }
+  const maxBet = Math.max(0, (player?.credits || 0) - MIN_REMAINING_CREDITS);
+  if (v > maxBet) { toast('Mindestens 2 Credits müssen übrig bleiben.', 'error'); return null; }
   return v;
 }
 
